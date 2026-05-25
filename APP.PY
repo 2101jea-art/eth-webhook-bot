@@ -10,53 +10,81 @@ API_SECRET     = os.environ.get("BINANCE_API_SECRET")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 SYMBOL         = "ETHUSDT"
 LEVERAGE       = 25
+RIESGO_PCT     = 0.10
+SL_ATR_MULT    = 2.2
 
 client = Client(API_KEY, API_SECRET)
 
-def get_quantity():
-    balance = client.futures_account_balance()
-    usdt = next((b for b in balance if b["asset"] == "USDT"), None)
-    if not usdt:
-        raise Exception("No USDT balance")
-    capital = float(usdt["availableBalance"])
-    price = float(client.futures_symbol_ticker(symbol=SYMBOL)["price"])
-    position_value = capital * 0.90 * LEVERAGE
-    quantity = round(position_value / price, 3)
-    return quantity
+def get_precision():
+    try:
+        info = client.futures_exchange_info()
+        for s in info['symbols']:
+            if s['symbol'] == SYMBOL:
+                return int(s['quantityPrecision'])
+    except:
+        pass
+    return 3
+
+def get_quantity(atr):
+    try:
+        balance  = client.futures_account_balance()
+        usdt     = next((b for b in balance if b["asset"] == "USDT"), None)
+        if not usdt:
+            raise Exception("No USDT balance")
+        available   = float(usdt["availableBalance"])
+        price       = float(client.futures_symbol_ticker(symbol=SYMBOL)["price"])
+        precision   = get_precision()
+
+        riesgo_cash = available * RIESGO_PCT
+        dist        = atr * SL_ATR_MULT
+        qty         = round(riesgo_cash / dist, precision)
+
+        # Control margen máximo
+        margen_requerido = (qty * price) / LEVERAGE
+        if margen_requerido > available * 0.90:
+            qty = round((available * 0.90 * LEVERAGE) / price, precision)
+
+        return qty
+    except Exception as e:
+        raise Exception(f"Error calculando quantity: {e}")
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-
     if not data:
         return jsonify({"error": "no data"}), 400
 
-    # Validar clave secreta
     if data.get("secret") != WEBHOOK_SECRET:
         return jsonify({"error": "unauthorized"}), 401
 
-    # Validar que tenga señal explícita
     signal = data.get("signal")
     if signal not in ["long", "short", "close_long", "close_short"]:
         return jsonify({"error": "invalid signal"}), 400
 
     try:
-        if signal == "long":
-            qty = get_quantity()
+        if signal in ["long", "short"]:
+            atr = float(data.get("atr", 0))
+            if atr <= 0:
+                return jsonify({"error": "invalid atr"}), 400
+
+            qty  = get_quantity(atr)
+            if qty <= 0:
+                return jsonify({"error": "qty too small"}), 400
+
+            side = SIDE_BUY if signal == "long" else SIDE_SELL
+
+            try:
+                client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
+            except:
+                pass
+
             client.futures_create_order(
-                symbol=SYMBOL,
-                side=SIDE_BUY,
-                type=ORDER_TYPE_MARKET,
-                quantity=qty
+                symbol   = SYMBOL,
+                side     = side,
+                type     = ORDER_TYPE_MARKET,
+                quantity = qty
             )
-        elif signal == "short":
-            qty = get_quantity()
-            client.futures_create_order(
-                symbol=SYMBOL,
-                side=SIDE_SELL,
-                type=ORDER_TYPE_MARKET,
-                quantity=qty
-            )
+
         elif signal in ["close_long", "close_short"]:
             positions = client.futures_position_information(symbol=SYMBOL)
             for p in positions:
@@ -64,12 +92,13 @@ def webhook():
                 if amt != 0:
                     close_side = SIDE_SELL if amt > 0 else SIDE_BUY
                     client.futures_create_order(
-                        symbol=SYMBOL,
-                        side=close_side,
-                        type=ORDER_TYPE_MARKET,
-                        quantity=abs(amt),
-                        reduceOnly=True
+                        symbol     = SYMBOL,
+                        side       = close_side,
+                        type       = ORDER_TYPE_MARKET,
+                        quantity   = abs(amt),
+                        reduceOnly = True
                     )
+
         return jsonify({"status": "ok"}), 200
 
     except Exception as e:
