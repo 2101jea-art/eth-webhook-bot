@@ -1,21 +1,31 @@
 from flask import Flask, request, jsonify
-import hmac, hashlib, os
+import os
 from binance.client import Client
+from binance.enums import *
 
 app = Flask(__name__)
 
 API_KEY    = os.environ.get("BINANCE_API_KEY")
 API_SECRET = os.environ.get("BINANCE_API_SECRET")
-WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 SYMBOL     = "ETHUSDT"
-QUANTITY   = float(os.environ.get("QUANTITY", "0.01"))
+LEVERAGE   = 25
 
 client = Client(API_KEY, API_SECRET)
+
+def get_quantity():
+    balance = client.futures_account_balance()
+    usdt = next((b for b in balance if b["asset"] == "USDT"), None)
+    if not usdt:
+        raise Exception("No se encontró balance USDT")
+    capital = float(usdt["availableBalance"])
+    price = float(client.futures_symbol_ticker(symbol=SYMBOL)["price"])
+    position_value = capital * 0.90 * LEVERAGE
+    quantity = round(position_value / price, 3)
+    return quantity
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json()
-
     if not data:
         return jsonify({"error": "no data"}), 400
 
@@ -28,20 +38,21 @@ def webhook():
             for p in position:
                 amt = float(p["positionAmt"])
                 if amt != 0:
-                    close_side = "SELL" if amt > 0 else "BUY"
+                    close_side = SIDE_SELL if amt > 0 else SIDE_BUY
                     client.futures_create_order(
                         symbol=SYMBOL,
                         side=close_side,
-                        type="MARKET",
+                        type=ORDER_TYPE_MARKET,
                         quantity=abs(amt),
                         reduceOnly=True
                     )
         else:
+            qty = get_quantity()
             client.futures_create_order(
                 symbol=SYMBOL,
                 side=side,
-                type="MARKET",
-                quantity=QUANTITY
+                type=ORDER_TYPE_MARKET,
+                quantity=qty
             )
         return jsonify({"status": "ok"}), 200
 
