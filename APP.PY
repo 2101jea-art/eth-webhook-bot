@@ -39,7 +39,6 @@ def get_quantity(atr):
         dist        = atr * SL_ATR_MULT
         qty         = round(riesgo_cash / dist, precision)
 
-        # Control margen máximo
         margen_requerido = (qty * price) / LEVERAGE
         if margen_requerido > available * 0.90:
             qty = round((available * 0.90 * LEVERAGE) / price, precision)
@@ -50,7 +49,8 @@ def get_quantity(atr):
 
 @app.route("/webhook", methods=["POST"])
 def webhook():
-    data = request.get_json()
+    data = request.get_json(force=True, silent=True)
+
     if not data:
         return jsonify({"error": "no data"}), 400
 
