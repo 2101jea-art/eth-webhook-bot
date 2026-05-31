@@ -42,6 +42,10 @@ def get_quantity(client, atr):
         qty = round((available * 0.90 * LEVERAGE) / price, precision)
     return qty
 
+@app.route("/ping", methods=["GET"])
+def ping():
+    return "OK", 200
+
 @app.route("/webhook", methods=["POST"])
 def webhook():
     data = request.get_json(force=True, silent=True)
@@ -58,7 +62,7 @@ def webhook():
             atr = float(data.get("atr", 0))
             if atr <= 0:
                 return jsonify({"error": "invalid atr"}), 400
-            qty  = get_quantity(client, atr)
+            qty = get_quantity(client, atr)
             if qty <= 0:
                 return jsonify({"error": "qty too small"}), 400
             side = SIDE_BUY if signal == "long" else SIDE_SELL
