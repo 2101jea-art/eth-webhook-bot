@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
 import os
-from threading import Thread, Lock
 from binance.client import Client
 from binance.enums import *
 
@@ -12,14 +11,11 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 SYMBOL         = "ETHUSDT"
 LEVERAGE       = 25
 RIESGO_PCT     = 0.10
-SL_ATR_MULT    = 2.4
+SL_ATR_MULT    = 2.2
 
-order_lock = Lock()
+client = Client(API_KEY, API_SECRET)
 
-def get_client():
-    return Client(API_KEY, API_SECRET)
-
-def get_precision(client):
+def get_precision():
     try:
         info = client.futures_exchange_info()
         for s in info['symbols']:
@@ -29,62 +25,24 @@ def get_precision(client):
         pass
     return 3
 
-def get_quantity(client, atr):
-    balance  = client.futures_account_balance()
-    usdt     = next((b for b in balance if b["asset"] == "USDT"), None)
-    if not usdt:
-        raise Exception("No USDT balance")
-    available   = float(usdt["availableBalance"])
-    price       = float(client.futures_symbol_ticker(symbol=SYMBOL)["price"])
-    precision   = get_precision(client)
-    riesgo_cash = available * RIESGO_PCT
-    dist        = atr * SL_ATR_MULT
-    qty         = round(riesgo_cash / dist, precision)
-    margen_requerido = (qty * price) / LEVERAGE
-    if margen_requerido > available * 0.90:
-        qty = round((available * 0.90 * LEVERAGE) / price, precision)
-    return qty
-
-def procesar_orden(data):
-    with order_lock:
-        try:
-            signal = data.get("signal")
-            client = get_client()
-
-            if signal in ["long", "short"]:
-                atr = float(data.get("atr", 0))
-                if atr <= 0:
-                    return
-                qty = get_quantity(client, atr)
-                if qty <= 0:
-                    return
-                side = SIDE_BUY if signal == "long" else SIDE_SELL
-                try:
-                    client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
-                except:
-                    pass
-                client.futures_create_order(
-                    symbol   = SYMBOL,
-                    side     = side,
-                    type     = ORDER_TYPE_MARKET,
-                    quantity = qty
-                )
-
-            elif signal in ["close_long", "close_short"]:
-                positions = client.futures_position_information(symbol=SYMBOL)
-                for p in positions:
-                    amt = float(p["positionAmt"])
-                    if amt != 0:
-                        close_side = SIDE_SELL if amt > 0 else SIDE_BUY
-                        client.futures_create_order(
-                            symbol     = SYMBOL,
-                            side       = close_side,
-                            type       = ORDER_TYPE_MARKET,
-                            quantity   = abs(amt),
-                            reduceOnly = True
-                        )
-        except Exception as e:
-            print(f"Error procesando orden: {e}")
+def get_quantity(atr):
+    try:
+        balance  = client.futures_account_balance()
+        usdt     = next((b for b in balance if b["asset"] == "USDT"), None)
+        if not usdt:
+            raise Exception("No USDT balance")
+        available   = float(usdt["availableBalance"])
+        price       = float(client.futures_symbol_ticker(symbol=SYMBOL)["price"])
+        precision   = get_precision()
+        riesgo_cash = available * RIESGO_PCT
+        dist        = atr * SL_ATR_MULT
+        qty         = round(riesgo_cash / dist, precision)
+        margen_requerido = (qty * price) / LEVERAGE
+        if margen_requerido > available * 0.90:
+            qty = round((available * 0.90 * LEVERAGE) / price, precision)
+        return qty
+    except Exception as e:
+        raise Exception(f"Error calculando quantity: {e}")
 
 @app.route("/ping", methods=["GET"])
 def ping():
@@ -100,9 +58,41 @@ def webhook():
     signal = data.get("signal")
     if signal not in ["long", "short", "close_long", "close_short"]:
         return jsonify({"error": "invalid signal"}), 400
-
-    Thread(target=procesar_orden, args=(data,)).start()
-    return jsonify({"status": "ok"}), 200
+    try:
+        if signal in ["long", "short"]:
+            atr = float(data.get("atr", 0))
+            if atr <= 0:
+                return jsonify({"error": "invalid atr"}), 400
+            qty = get_quantity(atr)
+            if qty <= 0:
+                return jsonify({"error": "qty too small"}), 400
+            side = SIDE_BUY if signal == "long" else SIDE_SELL
+            try:
+                client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
+            except:
+                pass
+            client.futures_create_order(
+                symbol   = SYMBOL,
+                side     = side,
+                type     = ORDER_TYPE_MARKET,
+                quantity = qty
+            )
+        elif signal in ["close_long", "close_short"]:
+            positions = client.futures_position_information(symbol=SYMBOL)
+            for p in positions:
+                amt = float(p["positionAmt"])
+                if amt != 0:
+                    close_side = SIDE_SELL if amt > 0 else SIDE_BUY
+                    client.futures_create_order(
+                        symbol     = SYMBOL,
+                        side       = close_side,
+                        type       = ORDER_TYPE_MARKET,
+                        quantity   = abs(amt),
+                        reduceOnly = True
+                    )
+        return jsonify({"status": "ok"}), 200
+    except Exception as e:
+        return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 5000))
