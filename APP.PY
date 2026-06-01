@@ -13,7 +13,7 @@ LEVERAGE       = 25
 RIESGO_PCT     = 0.10
 SL_ATR_MULT    = 2.2
 
-client = Client(API_KEY, API_SECRET)
+client = Client(API_KEY, API_SECRET, ping=False)
 
 def get_precision():
     try:
