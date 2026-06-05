@@ -11,7 +11,7 @@ WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
 SYMBOL         = "ETHUSDT"
 LEVERAGE       = 25
 RIESGO_PCT     = 0.10
-SL_ATR_MULT    = 2.2
+SL_ATR_MULT    = 2.4
 
 client = Client(API_KEY, API_SECRET, ping=False)
 
