@@ -1,2 +1,2 @@
-flask
-python-binance
+flask==2.3.3
+python-binance==1.0.19
