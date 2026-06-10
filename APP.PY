@@ -13,7 +13,9 @@ LEVERAGE       = 25
 RIESGO_PCT     = 0.10
 SL_ATR_MULT    = 2.4
 
-def get_precision(client):
+client = Client(API_KEY, API_SECRET, ping=False)
+
+def get_precision():
     try:
         info = client.futures_exchange_info()
         for s in info['symbols']:
@@ -23,7 +25,7 @@ def get_precision(client):
         pass
     return 3
 
-def get_quantity(atr, client):
+def get_quantity(atr):
     try:
         balance  = client.futures_account_balance()
         usdt     = next((b for b in balance if b["asset"] == "USDT"), None)
@@ -31,7 +33,7 @@ def get_quantity(atr, client):
             raise Exception("No USDT balance")
         available        = float(usdt["availableBalance"])
         price            = float(client.futures_symbol_ticker(symbol=SYMBOL)["price"])
-        precision        = get_precision(client)
+        precision        = get_precision()
         riesgo_cash      = available * RIESGO_PCT
         dist             = atr * SL_ATR_MULT
         qty              = round(riesgo_cash / dist, precision)
@@ -57,12 +59,11 @@ def webhook():
     if signal not in ["long", "short", "close_long", "close_short"]:
         return jsonify({"error": "invalid signal"}), 400
     try:
-        client = Client(API_KEY, API_SECRET, ping=False)
         if signal in ["long", "short"]:
             atr = float(data.get("atr", 0))
             if atr <= 0:
                 return jsonify({"error": "invalid atr"}), 400
-            qty = get_quantity(atr, client)
+            qty = get_quantity(atr)
             if qty <= 0:
                 return jsonify({"error": "qty too small"}), 400
             side = SIDE_BUY if signal == "long" else SIDE_SELL
@@ -71,10 +72,8 @@ def webhook():
             except:
                 pass
             client.futures_create_order(
-                symbol   = SYMBOL,
-                side     = side,
-                type     = ORDER_TYPE_MARKET,
-                quantity = qty
+                symbol=SYMBOL, side=side,
+                type=ORDER_TYPE_MARKET, quantity=qty
             )
         elif signal in ["close_long", "close_short"]:
             positions = client.futures_position_information(symbol=SYMBOL)
@@ -83,11 +82,9 @@ def webhook():
                 if amt != 0:
                     close_side = SIDE_SELL if amt > 0 else SIDE_BUY
                     client.futures_create_order(
-                        symbol     = SYMBOL,
-                        side       = close_side,
-                        type       = ORDER_TYPE_MARKET,
-                        quantity   = abs(amt),
-                        reduceOnly = True
+                        symbol=SYMBOL, side=close_side,
+                        type=ORDER_TYPE_MARKET,
+                        quantity=abs(amt), reduceOnly=True
                     )
         return jsonify({"status": "ok"}), 200
     except Exception as e:
