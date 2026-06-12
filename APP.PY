@@ -1,39 +1,39 @@
 from flask import Flask, request, jsonify
 import os
-import ccxt
+from binance.client import Client
+from binance.enums import *
 
 app = Flask(__name__)
 
 API_KEY        = os.environ.get("BINANCE_API_KEY")
 API_SECRET     = os.environ.get("BINANCE_API_SECRET")
 WEBHOOK_SECRET = os.environ.get("WEBHOOK_SECRET")
-SYMBOL         = "ETH/USDT:USDT"
+SYMBOL         = "ETHUSDT"
 LEVERAGE       = 25
 RIESGO_PCT     = 0.10
 SL_ATR_MULT    = 2.4
 
-exchange = ccxt.binance({
-    "apiKey": API_KEY,
-    "secret": API_SECRET,
-    "options": {
-        "defaultType": "swap",
-        "adjustForTimeDifference": True
-    },
-    "enableRateLimit": False
-})
+client = Client(API_KEY, API_SECRET, ping=False)
 
-try:
-    exchange.load_markets()
-except Exception as e:
-    print(f"[INIT] Warning: load_markets failed: {e}")
+def get_precision():
+    try:
+        info = client.futures_exchange_info()
+        for s in info['symbols']:
+            if s['symbol'] == SYMBOL:
+                return int(s['quantityPrecision'])
+    except:
+        pass
+    return 3
 
 def get_quantity(atr):
     try:
-        balance   = exchange.fetch_balance({"type": "future"})
-        available = float(balance["USDT"]["free"])
-        ticker    = exchange.fetch_ticker(SYMBOL)
-        price     = float(ticker["last"])
-        precision = exchange.markets[SYMBOL]["precision"]["amount"]
+        balance  = client.futures_account_balance()
+        usdt     = next((b for b in balance if b["asset"] == "USDT"), None)
+        if not usdt:
+            raise Exception("No USDT balance")
+        available        = float(usdt["availableBalance"])
+        price            = float(client.futures_symbol_ticker(symbol=SYMBOL)["price"])
+        precision        = get_precision()
         riesgo_cash      = available * RIESGO_PCT
         dist             = atr * SL_ATR_MULT
         qty              = round(riesgo_cash / dist, precision)
@@ -59,7 +59,6 @@ def webhook():
     if signal not in ["long", "short", "close_long", "close_short"]:
         return jsonify({"error": "invalid signal"}), 400
     try:
-        exchange.set_leverage(LEVERAGE, SYMBOL)
         if signal in ["long", "short"]:
             atr = float(data.get("atr", 0))
             if atr <= 0:
@@ -67,20 +66,30 @@ def webhook():
             qty = get_quantity(atr)
             if qty <= 0:
                 return jsonify({"error": "qty too small"}), 400
-            side = "buy" if signal == "long" else "sell"
-            exchange.create_order(SYMBOL, "market", side, qty)
+            side = SIDE_BUY if signal == "long" else SIDE_SELL
+            try:
+                client.futures_change_leverage(symbol=SYMBOL, leverage=LEVERAGE)
+            except:
+                pass
+            client.futures_create_order(
+                symbol=SYMBOL, side=side,
+                type=ORDER_TYPE_MARKET, quantity=qty
+            )
         elif signal in ["close_long", "close_short"]:
-            positions = exchange.fetch_positions([SYMBOL])
+            positions = client.futures_position_information(symbol=SYMBOL)
             for p in positions:
-                contracts = float(p["contracts"] or 0)
-                if contracts != 0:
-                    close_side = "sell" if p["side"] == "long" else "buy"
-                    exchange.create_order(
-                        SYMBOL, "market", close_side, contracts,
-                        params={"reduceOnly": "true"}
+                amt = float(p["positionAmt"])
+                if amt != 0:
+                    close_side = SIDE_SELL if amt > 0 else SIDE_BUY
+                    client.futures_create_order(
+                        symbol=SYMBOL, side=close_side,
+                        type=ORDER_TYPE_MARKET,
+                        quantity=abs(amt), reduceOnly=True
                     )
         return jsonify({"status": "ok"}), 200
     except Exception as e:
+        import traceback
+        traceback.print_exc()
         return jsonify({"error": str(e)}), 500
 
 if __name__ == "__main__":
