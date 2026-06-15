@@ -1,7 +1,9 @@
 from flask import Flask, request, jsonify
 import os
+import time
 from binance.client import Client
 from binance.enums import *
+from binance.exceptions import BinanceAPIException
 
 app = Flask(__name__)
 
@@ -32,11 +34,32 @@ except Exception as e:
 
 # ==========================================
 
+# ===== RETRY PARA -1003 =====
+def retry_binance(func, *args, **kwargs):
+
+    for intento in range(3):
+
+        try:
+            return func(*args, **kwargs)
+
+        except BinanceAPIException as e:
+
+            if e.code == -1003:
+                print(f"Rate limit. Reintento {intento+1}/3")
+                time.sleep(5)
+
+            else:
+                raise
+
+    raise Exception("Binance sigue respondiendo -1003")
+
+# ================================
+
 def get_quantity(atr):
 
     try:
 
-        balance = client.futures_account_balance()
+        balance = retry_binance(client.futures_account_balance)
 
         usdt = next(
             (b for b in balance if b["asset"] == "USDT"),
@@ -49,7 +72,8 @@ def get_quantity(atr):
         available = float(usdt["availableBalance"])
 
         price = float(
-            client.futures_symbol_ticker(
+            retry_binance(
+                client.futures_symbol_ticker,
                 symbol=SYMBOL
             )["price"]
         )
@@ -152,7 +176,8 @@ def webhook():
                 else SIDE_SELL
             )
 
-            client.futures_create_order(
+            retry_binance(
+                client.futures_create_order,
                 symbol=SYMBOL,
                 side=side,
                 type=ORDER_TYPE_MARKET,
@@ -164,7 +189,8 @@ def webhook():
             "close_short"
         ]:
 
-            positions = client.futures_position_information(
+            positions = retry_binance(
+                client.futures_position_information,
                 symbol=SYMBOL
             )
 
@@ -182,7 +208,8 @@ def webhook():
                         else SIDE_BUY
                     )
 
-                    client.futures_create_order(
+                    retry_binance(
+                        client.futures_create_order,
                         symbol=SYMBOL,
                         side=close_side,
                         type=ORDER_TYPE_MARKET,
@@ -217,3 +244,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
+
