@@ -37,6 +37,8 @@ except Exception as e:
 # ===== RETRY PARA -1003 =====
 def retry_binance(func, *args, **kwargs):
 
+    ultimo_error = None
+
     for intento in range(3):
 
         try:
@@ -44,14 +46,26 @@ def retry_binance(func, *args, **kwargs):
 
         except BinanceAPIException as e:
 
+            ultimo_error = e
+
+            print("=" * 60)
+            print("BINANCE ERROR COMPLETO")
+            print(f"Codigo: {e.code}")
+            print(f"Mensaje: {e}")
+            print("=" * 60)
+
             if e.code == -1003:
+
                 print(f"Rate limit. Reintento {intento+1}/3")
                 time.sleep(5)
 
             else:
                 raise
 
-    raise Exception("Binance sigue respondiendo -1003")
+    raise Exception(
+        f"Binance sigue respondiendo -1003. "
+        f"Error completo: {ultimo_error}"
+    )
 
 # ================================
 
@@ -244,4 +258,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
-
