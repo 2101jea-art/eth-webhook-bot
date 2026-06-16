@@ -29,7 +29,7 @@ try:
 except Exception as e:
     print(f"Error obteniendo precision: {e}")
 
-```python
+
 def retry_binance(func, *args, **kwargs):
     ultimo_error = None
 
@@ -51,7 +51,7 @@ def retry_binance(func, *args, **kwargs):
                 raise
 
     raise Exception(f"Binance -1003 persistente: {ultimo_error}")
-```
+
 
 
 def get_quantity(atr):
