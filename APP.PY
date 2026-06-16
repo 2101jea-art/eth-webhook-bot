@@ -29,20 +29,30 @@ try:
 except Exception as e:
     print(f"Error obteniendo precision: {e}")
 
+```python
 def retry_binance(func, *args, **kwargs):
     ultimo_error = None
-    for intento in range(3):
+
+    for intento in range(2):
+
         try:
             return func(*args, **kwargs)
+
         except BinanceAPIException as e:
+
             ultimo_error = e
+
             print(f"Binance error codigo: {e.code} mensaje: {e}")
+
             if e.code == -1003:
-                print(f"Rate limit. Reintento {intento+1}/3")
-                time.sleep(5)
+                print(f"Rate limit. Reintento {intento+1}/2")
+                time.sleep(1)
             else:
                 raise
+
     raise Exception(f"Binance -1003 persistente: {ultimo_error}")
+```
+
 
 def get_quantity(atr):
     try:
