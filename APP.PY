@@ -35,11 +35,12 @@ except Exception as e:
 # ==========================================
 
 # ===== RETRY PARA -1003 =====
+```python
 def retry_binance(func, *args, **kwargs):
 
     ultimo_error = None
 
-    for intento in range(3):
+    for intento in range(2):
 
         try:
             return func(*args, **kwargs)
@@ -56,8 +57,8 @@ def retry_binance(func, *args, **kwargs):
 
             if e.code == -1003:
 
-                print(f"Rate limit. Reintento {intento+1}/3")
-                time.sleep(5)
+                print(f"Rate limit. Reintento {intento+1}/2")
+                time.sleep(1)
 
             else:
                 raise
@@ -66,6 +67,8 @@ def retry_binance(func, *args, **kwargs):
         f"Binance sigue respondiendo -1003. "
         f"Error completo: {ultimo_error}"
     )
+
+
 
 # ================================
 
