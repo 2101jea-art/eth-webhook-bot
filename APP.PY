@@ -41,6 +41,7 @@ def get_cached(key, func, *args, **kwargs):
     return result
 
 PRECISION = 3
+BALANCE_CACHE = None
 
 try:
     info = client.futures_exchange_info()
@@ -76,28 +77,47 @@ def retry_binance(func, *args, **kwargs):
 
     raise Exception(f"Binance -1003 persistente: {ultimo_error}")
 
+def refresh_balance():
+
+    global BALANCE_CACHE
+
+    balance = retry_binance(
+        client.futures_account_balance
+    )
+
+    usdt = next(
+        (b for b in balance if b["asset"] == "USDT"),
+        None
+    )
+
+    if not usdt:
+        raise Exception("No USDT balance")
+
+    BALANCE_CACHE = float(
+        usdt["availableBalance"]
+    )
+
+    print(
+        f"Balance actualizado: {BALANCE_CACHE}"
+    )
+
+try:
+    refresh_balance()
+except Exception as e:
+    print(
+        f"Error cargando balance inicial: {e}"
+    )
+
 def get_quantity(atr):
+
+    global BALANCE_CACHE
 
     try:
 
-        balance = get_cached(
-            "balance",
-            lambda: retry_binance(
-                client.futures_account_balance
-            )
-        )
+        if BALANCE_CACHE is None:
+            refresh_balance()
 
-        usdt = next(
-            (b for b in balance if b["asset"] == "USDT"),
-            None
-        )
-
-        if not usdt:
-            raise Exception("No USDT balance")
-
-        available = float(
-            usdt["availableBalance"]
-        )
+        available = BALANCE_CACHE
 
         price = float(
             get_cached(
@@ -248,6 +268,13 @@ def webhook():
                         reduceOnly=True
                     )
 
+            try:
+                refresh_balance()
+            except Exception as e:
+                print(
+                    f"Error actualizando balance: {e}"
+                )
+
         return jsonify(
             {"status": "ok"}
         ), 200
@@ -275,4 +302,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
-
