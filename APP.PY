@@ -1,4 +1,3 @@
-
 from flask import Flask, request, jsonify
 import os
 import time
@@ -70,8 +69,18 @@ def retry_binance(func, *args, **kwargs):
             print(f"Binance error codigo: {e.code} mensaje: {e}")
 
             if e.code == -1003:
-                print(f"Rate limit. Reintento {intento+1}/2")
-                time.sleep(1)
+
+                # Si el mensaje dice "banned until", NO reintentar.
+                # Reintentar mientras el ban esta activo solo suma
+                # peso y puede extender el ban (confirmado por Binance).
+                if "banned until" in str(e):
+                    print("IP banneada. No se reintenta.")
+                    raise Exception(
+                        f"IP banneada por Binance: {e}"
+                    )
+
+                print(f"Rate limit (no ban). Reintento {intento+1}/2")
+                time.sleep(2)
             else:
                 raise
 
@@ -302,3 +311,4 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
+
