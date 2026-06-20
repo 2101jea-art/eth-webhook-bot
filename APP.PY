@@ -210,6 +210,15 @@ def webhook():
 
         print("WEBHOOK:", data)
 
+        if signal == "long":
+            print("RECIBI LONG")
+        elif signal == "short":
+            print("RECIBI SHORT")
+        elif signal == "close_long":
+            print("RECIBI CLOSE_LONG")
+        elif signal == "close_short":
+            print("RECIBI CLOSE_SHORT")
+
         if signal in ["long", "short"]:
 
             atr = float(
@@ -311,4 +320,3 @@ if __name__ == "__main__":
         host="0.0.0.0",
         port=port
     )
-
